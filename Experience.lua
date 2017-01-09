@@ -10,17 +10,17 @@ local Experience = classic.class('Experience')
 function Experience:_init(capacity, opt, isValidation)
   self.capacity = capacity
   -- Extract relevant options
-  self.batchSize = opt.batchSize
+  self.batchSize = opt.batchSize  -- For the Catch DQN demo, the batchSize is 32. It seems like for all async settings, this value is set to 5.
   self.histLen = opt.histLen
   self.gpu = opt.gpu
   self.discretiseMem = opt.discretiseMem
   self.memPriority = opt.memPriority
   self.learnStart = opt.learnStart
-  self.alpha = opt.alpha
-  self.betaZero = opt.betaZero
+  self.alpha = opt.alpha  -- Prioritised experience replay exponent α, default setting is 0.5
+  self.betaZero = opt.betaZero  -- Initial value of importance-sampling exponent β. Take a look at the prioritized EP for explanation
 
   -- Create transition tuples buffer
-  local bufferStateSize = torch.LongStorage(_.append({opt.batchSize, opt.histLen}, opt.stateSpec[2]))
+  local bufferStateSize = torch.LongStorage(_.append({opt.batchSize, opt.histLen}, opt.stateSpec[2])) -- _.append() returns a table
   self.transTuples = {
     states = opt.Tensor(bufferStateSize),
     actions = torch.ByteTensor(opt.batchSize),
@@ -56,7 +56,7 @@ function Experience:_init(capacity, opt, isValidation)
   self.priorityQueue = BinaryHeap(capacity) -- Stored at time t
   self.smallConst = 1e-12
   -- Sampling priority
-  if not isValidation and opt.memPriority == 'rank' then
+  if not isValidation and opt.memPriority == 'rank' then  -- right now, only rank prioritized EP is implemented
     -- Cache partition indices for several values of N as α is static
     self.distributions = {}
     local nPartitions = 100 -- learnStart must be at least 1/100 of capacity (arbitrary constant)
@@ -141,7 +141,7 @@ function Experience:store(reward, state, terminal, action)
   else
     self.states[self.index] = state:clone()
   end
-  self.terminals[self.index] = terminal and 1 or 0
+  self.terminals[self.index] = terminal and 1 or 0  -- attention: in Lua, only nil and false are treated as false. This is a way to set 1 to terminal state, and 0 otherwise
   self.actions[self.index] = action
   self.invalid[self.index] = 0
 
@@ -175,7 +175,7 @@ function Experience:retrieve(indices)
     -- Retrieve action
     self.transTuples.actions[n] = self.actions[memIndex]
     -- Retrieve rewards
-    self.transTuples.rewards[n] = self.rewards[memIndex]
+    self.transTuples.rewards[n] = self.rewards[memIndex]  -- attention: the reward of a transition is stored with time index t (not t+1)
     -- Retrieve terminal status (of transition)
     self.transTuples.terminals[n] = self.terminals[self:circIndex(memIndex + 1)]
 
@@ -185,8 +185,10 @@ function Experience:retrieve(indices)
       if self.discretiseMem then
         -- Copy state (converting to float first for non-integer division)
         self.transTuples.states[n][histIndex]:div(self.states[memIndex]:typeAs(self.transTuples.states), self.imgDiscLevels) -- byte -> float
+        print('###', self.imgDiscLevels, self.transTuples.states[n][histIndex]) os.exit()
       else
         self.transTuples.states[n][histIndex] = self.states[memIndex]:typeAs(self.transTuples.states)
+        print('@@@', self.transTuples.states[n][histIndex]) os.exit()
       end
       -- Adjust indices
       memIndex = self:circIndex(memIndex - 1)
@@ -194,7 +196,7 @@ function Experience:retrieve(indices)
     until histIndex == 0 or self.terminals[memIndex] == 1 or self.invalid[memIndex] == 1
 
     -- If transition not terminal, fill in transition history (invalid states should not be selected in the first place)
-    if self.transTuples.terminals[n] == 0 then
+    if self.transTuples.terminals[n] == 0 then  -- this means if terminal is reached, this transition (s') is kept as zero tensor. It does not matter since if terminal is reached, V(s') is not calculated in updating
       -- Copy most recent state
       for h = 2, self.histLen do
         self.transTuples.transitions[n][h - 1] = self.transTuples.states[n][h]
@@ -217,7 +219,7 @@ function Experience:validateTransition(index)
   -- Calculate beginning of state and end of transition for checking overlap with head of buffer
   local minIndex, maxIndex = index - self.histLen, self:circIndex(index + 1)
   -- State must not be terminal, invalid, or overlap with head of buffer
-  return self.terminals[index] == 0 and self.invalid[index] == 0 and (self.index <= minIndex or self.index >= maxIndex)
+  return self.terminals[index] == 0 and self.invalid[index] == 0 and (self.index <= minIndex or self.index >= maxIndex) -- attention: self.index is pointer to next inserted record
 end
 
 -- Returns indices and importance-sampling weights based on (stochastic) proportional prioritised sampling
