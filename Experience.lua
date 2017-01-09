@@ -185,10 +185,8 @@ function Experience:retrieve(indices)
       if self.discretiseMem then
         -- Copy state (converting to float first for non-integer division)
         self.transTuples.states[n][histIndex]:div(self.states[memIndex]:typeAs(self.transTuples.states), self.imgDiscLevels) -- byte -> float
-        print('###', self.imgDiscLevels, self.transTuples.states[n][histIndex]) os.exit()
       else
         self.transTuples.states[n][histIndex] = self.states[memIndex]:typeAs(self.transTuples.states)
-        print('@@@', self.transTuples.states[n][histIndex]) os.exit()
       end
       -- Adjust indices
       memIndex = self:circIndex(memIndex - 1)
