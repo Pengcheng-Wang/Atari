@@ -26,14 +26,14 @@ function Model:_init(opt)
   self.width = opt.width
   self.height = opt.height
   self.modelBody = opt.modelBody
-  self.hiddenSize = opt.hiddenSize
+  self.hiddenSize = opt.hiddenSize  -- Default value is 512. For the Catch demo, it is 32.
   self.histLen = opt.histLen
-  self.duel = opt.duel
-  self.bootstraps = opt.bootstraps
-  self.recurrent = opt.recurrent
-  self.env = opt.env
-  self.modelBody = opt.modelBody
-  self.async = opt.async
+  self.duel = opt.duel  -- bool
+  self.bootstraps = opt.bootstraps  -- int
+  self.recurrent = opt.recurrent  -- bool
+  self.env = opt.env  -- string. e.g., 'rlenvs.Catch'
+  self.modelBody = opt.modelBody  -- string. e.g., 'models.Catch'
+  self.async = opt.async  -- string. e.g., 'A3C' or 'NStepQ'
   self.a3c = opt.async == 'A3C'
   self.stateSpec = opt.stateSpec
 
@@ -90,11 +90,12 @@ function Model:create()
   local body = Body(self):createBody()
 
   -- Calculate body output size
-  local bodyOutputSize = torch.prod(torch.Tensor(getOutputSize(body, _.append({histLen}, self.stateSpec[2]))))
-  if not self.async and self.recurrent then
+  local bodyOutputSize = torch.prod(torch.Tensor(getOutputSize(body, _.append({histLen}, self.stateSpec[2]))))  -- return of _.append({histLen}, self.stateSpec[2]) is a table of {4, 1, 24, 24} for Catch demo
+  -- When _.append({histLen}, self.stateSpec[2]) is like {1, 1, 24, 24} in RNN setting on Catch, getOutputSize(...) is like {32, 4, 4} after the CNN processing (there should be another batchIndex)
+  if not self.async and self.recurrent then --
     body:add(nn.View(-1, bodyOutputSize))
-    net:add(nn.MinDim(1, 4))
-    net:add(nn.Transpose({1, 2}))
+    net:add(nn.MinDim(1, 4))  -- If input dimension < 4, then add one extra dimension at index 1
+    net:add(nn.Transpose({1, 2})) -- swap 1st and 2nd dimension -- This is used for SeqLSTM when recurrent is true and async is false. SeqLSTM requires batchIndex be the 2nd dim
     body = nn.Bottle(body, 4, 2)
     net:add(body)
     net:add(nn.MinDim(1, 3))
@@ -102,15 +103,18 @@ function Model:create()
      body:add(nn.View(bodyOutputSize))
      net:add(body)
   end
+  -- print('###', getOutputSize(net, {50, 10, 1, 24, 24})) os.exit() -- The printed info is {10, 50, 512}. I suppose 50 is batchSize, 10 is histLen. 512 is bcz CNN's output is 32*4*4.
+  -- The above is the situation when recurrent is true and async is false
+  -- When recurrent is false, this printed info becomes {50, 512}
 
   -- Network head
   local head = nn.Sequential()
-  local heads = math.max(self.bootstraps, 1)
-  if self.duel then
+  local heads = math.max(self.bootstraps, 1)  -- for the Catch demo, the default bootstraps value is 0
+  if self.duel then -- In default, duel network is used
     -- Value approximator V^(s)
     local valStream = nn.Sequential()
     if self.recurrent and self.async then
-      local lstm = nn.FastLSTM(bodyOutputSize, self.hiddenSize, self.histLen)
+      local lstm = nn.FastLSTM(bodyOutputSize, self.hiddenSize, self.histLen) -- the 3rd param, [rho], the maximum amount of backpropagation steps to take back in time, default value is 9999
       lstm.i2g:init({'bias', {{3*self.hiddenSize+1, 4*self.hiddenSize}}}, nninit.constant, 1)
       lstm:remember('both')
       valStream:add(lstm)
@@ -154,6 +158,10 @@ function Model:create()
     head:add(streams)
     -- Add dueling streams aggregator module
     head:add(DuelAggregator(self.m))
+    -- print('###', getOutputSize(head, {10, 50, 512})) os.exit() -- In case self.recurrent is true, input to one head is of size {10, 50, 512},
+    -- with 10 being histLen, 50 being batchSize, and 512 be # of features from output of previous layers. Output is of size {50, 3, 1},
+    -- with 3 being # of actions. If self.recurrent is false,
+    -- input to one head module should be {50, 512}. Then output of head module is still {50, 3, 1}
   else
     if self.recurrent and self.async then
       local lstm = nn.FastLSTM(bodyOutputSize, self.hiddenSize, self.histLen)
@@ -163,8 +171,9 @@ function Model:create()
     elseif self.recurrent then
       local lstm = nn.SeqLSTM(bodyOutputSize, self.hiddenSize)
       lstm:remember('both')
-      head:add(lstm)
-      head:add(nn.Select(-3, -1)) -- Select last timestep
+      head:add(lstm)  -- output here is of size {10, 50, 32}, with 10 being histLen, 50 being batchSize, 32 being hidden neuron #
+      head:add(nn.Select(-3, -1)) -- Select last timestep. Output here is of size {50, 32}
+      -- print('###', getOutputSize(head, {10, 50, 512})) os.exit()
     else
       head:add(nn.Linear(bodyOutputSize, self.hiddenSize))
       head:add(nn.ReLU(true)) -- DRQN paper reports worse performance with ReLU after LSTM
@@ -172,7 +181,7 @@ function Model:create()
     head:add(nn.Linear(self.hiddenSize, self.m)) -- Note: Tuned DDQN uses shared bias at last layer
   end
 
-  if self.bootstraps > 0 then
+  if self.bootstraps > 0 then -- In Setup.lua the default value is 10. For Catch demo, the default value is 0
     -- Add bootstrap heads
     local headConcat = nn.ConcatTable()
     for h = 1, heads do

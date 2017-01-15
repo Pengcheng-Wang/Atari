@@ -112,7 +112,6 @@ function Experience:_init(capacity, opt, isValidation)
 
   -- Calculate β growth factor (linearly annealed till end of training)
   self.betaGrad = (1 - opt.betaZero)/(opt.steps - opt.learnStart)
-
   -- Get singleton instance for step
   self.globals = Singleton.getInstance()
 end
@@ -261,7 +260,7 @@ function Experience:sample()
         -- Sample within stratum
         rankIndices[n] = torch.random(distribution.strataEnds[n] + 1, distribution.strataEnds[n+1])
         -- Retrieve actual transition index
-        index = self.priorityQueue:getValueByVal(rankIndices[n])
+        index = self.priorityQueue:getValueByVal(rankIndices[n])  -- get experience replay pool index from priority queue index
         isValid = self:validateTransition(index) -- The last stratum might be full of terminal states, leading to many checks
       end
 

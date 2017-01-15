@@ -30,43 +30,43 @@ function Agent:_init(opt)
   self.policyNet = self.model:create()
   self.targetNet = self.policyNet:clone() -- Create deep copy for target network
   self.targetNet:evaluate() -- Target network always in evaluation mode
-  self.tau = opt.tau
-  self.doubleQ = opt.doubleQ
+  self.tau = opt.tau    -- Target network is updated every tau steps
+  self.doubleQ = opt.doubleQ  -- A bool value, indicating whether to use Double-Q Learning
   -- Network parameters θ and gradients dθ
   self.theta, self.dTheta = self.policyNet:getParameters()
 
   -- Boostrapping
-  self.bootstraps = opt.bootstraps
+  self.bootstraps = opt.bootstraps  -- for the Catch demo, this bootstraps value is set to 0 in default
   self.head = 1 -- Identity of current episode bootstrap head
   self.heads = math.max(opt.bootstraps, 1) -- Number of heads
 
   -- Recurrency
-  self.recurrent = opt.recurrent
-  self.histLen = opt.histLen
+  self.recurrent = opt.recurrent  -- bool. For the Catch demo, this recurrent default value is false
+  self.histLen = opt.histLen  -- DQN standard is 4, DRQN is 10 (Comments from original authors)
 
   -- Reinforcement learning parameters
-  self.gamma = opt.gamma
-  self.rewardClip = opt.rewardClip
-  self.tdClip = opt.tdClip
-  self.epsilonStart = opt.epsilonStart
+  self.gamma = opt.gamma  -- discount factor, 0.99 in default
+  self.rewardClip = opt.rewardClip  -- 1 in default
+  self.tdClip = opt.tdClip  -- 1 in default
+  self.epsilonStart = opt.epsilonStart  -- initial epsilon value used in epdilon-greedy. Inital value is 1
   self.epsilonEnd = opt.epsilonEnd
   self.epsilonGrad = (opt.epsilonEnd - opt.epsilonStart)/opt.epsilonSteps -- Greediness ε decay factor
-  self.PALpha = opt.PALpha
+  self.PALpha = opt.PALpha  -- this value is a param used in Persistent Advantage Learning, the default value is 0.9
 
   -- State buffer
-  self.stateBuffer = CircularQueue(opt.recurrent and 1 or opt.histLen, opt.Tensor, opt.stateSpec[2])
+  self.stateBuffer = CircularQueue(opt.recurrent and 1 or opt.histLen, opt.Tensor, opt.stateSpec[2])  -- the buffer stores histLen long of observations
   -- Experience replay memory
   self.memory = Experience(opt.memSize, opt)
-  self.memSampleFreq = opt.memSampleFreq
-  self.memNSamples = opt.memNSamples
+  self.memSampleFreq = opt.memSampleFreq  -- Freq to "learn"
+  self.memNSamples = opt.memNSamples  -- Number of optimizations to take in each learning process
   self.memSize = opt.memSize
-  self.memPriority = opt.memPriority
+  self.memPriority = opt.memPriority  -- prioritized experience replay. Could be '', or 'rank' right now
 
   -- Training mode
   self.isTraining = false
   self.batchSize = opt.batchSize
   self.learnStart = opt.learnStart
-  self.progFreq = opt.progFreq
+  self.progFreq = opt.progFreq  -- progress reporting frequency
   self.gradClip = opt.gradClip
   -- Optimiser parameters
   self.optimiser = opt.optimiser
@@ -93,14 +93,14 @@ function Agent:_init(opt)
   self.Tensor = opt.Tensor
 
   -- Saliency display
-  self:setSaliency(opt.saliency) -- Set saliency option on agent and model
-  if #opt.stateSpec[2] == 3 then -- Make saliency map only for visual states
+  self:setSaliency(opt.saliency) -- Set saliency option on agent and model, in opt it can be <none>|normal|guided|deconvnet, then transferred to true/false
+  if #opt.stateSpec[2] == 3 then -- Make salie0ncy map only for visual states
     self.saliencyMap = opt.Tensor(1, opt.stateSpec[2][2], opt.stateSpec[2][3]):zero()
-    self.inputGrads = opt.Tensor(opt.histLen*opt.stateSpec[2][1], opt.stateSpec[2][2], opt.stateSpec[2][3]):zero() -- Gradients with respect to the input (for saliency maps)
+    self.inputGrads = opt.Tensor(opt.histLen*opt.stateSpec[2][1], opt.stateSpec[2][2], opt.stateSpec[2][3]):zero() -- Gradients with respect to the input (for saliency maps) Todo:pwang8. Is this inputGrads of the correct size if recurrent is used?
   end
 
   -- Get singleton instance for step
-  self.globals = Singleton.getInstance()
+  self.globals = Singleton.getInstance()  -- this global singleton stores one value, the steps
 end
 
 -- Sets training mode
@@ -111,7 +111,7 @@ function Agent:training()
   self.stateBuffer:clear()
   -- Reset bootstrap head
   if self.bootstraps > 0 then
-    self.head = torch.random(self.bootstraps)
+    self.head = torch.random(self.bootstraps) -- here this self.bootstraps is a integer
   end
   -- Forget last sequence
   if self.recurrent then
@@ -153,10 +153,10 @@ function Agent:observe(reward, rawObservation, terminal)
   if terminal then
     self.stateBuffer:pushReset(observation) -- Will clear buffer on next push
   else
-    self.stateBuffer:push(observation)
+    self.stateBuffer:push(observation)  -- the size/capacity of the CircularQueue equals histLen
   end
   -- Retrieve current and historical states from state buffer
-  local state = self.stateBuffer:readAll()
+  local state = self.stateBuffer:readAll()  -- the returned value is one tensor containing all histLen frames
 
   -- Set ε based on training vs. evaluation mode
   local epsilon = 0.001 -- Taken from tuned DDQN evaluation
@@ -174,10 +174,10 @@ function Agent:observe(reward, rawObservation, terminal)
   if not terminal then
     if not self.isTraining and self.bootstraps > 0 then
       -- Retrieve estimates from all heads
-      local QHeads = self.policyNet:forward(state)
+      local QHeads = self.policyNet:forward(state)  -- QHeads (2-dim) has size (heads_count * action_num)
 
       -- Use ensemble policy with bootstrap heads (in evaluation mode)
-      local QHeadsMax, QHeadsMaxInds = QHeads:max(2) -- Find max action per head
+      local QHeadsMax, QHeadsMaxInds = QHeads:max(2) -- Find max action per head -- torch.mode() is a function returns most frequently appeared element (maths)
       aIndex = torch.mode(QHeadsMaxInds:float(), 1)[1][1] -- TODO: Torch.CudaTensor:mode is missing
 
       -- Plot uncertainty in ensemble policy
@@ -195,7 +195,7 @@ function Agent:observe(reward, rawObservation, terminal)
 
       -- Forward state anyway if recurrent
       if self.recurrent then
-        self.policyNet:forward(state)
+        self.policyNet:forward(state) -- This state's size is 1*24*24 for Catch. That is channel*height*width
       end
 
       -- Reset saliency if action not chosen by network
@@ -207,8 +207,8 @@ function Agent:observe(reward, rawObservation, terminal)
       local QHeads = self.policyNet:forward(state)
 
       -- Sample from current episode head (indexes on first dimension with no batch)
-      local Qs = QHeads:select(1, self.head)
-      local maxQ = Qs[1]
+      local Qs = QHeads:select(1, self.head)  -- This self.head value is randomly set when Agent:training() is called
+      local maxQ = Qs[1]                      --
       local bestAs = {1}
       -- Find best actions
       for a = 2, self.m do
@@ -254,7 +254,7 @@ function Agent:observe(reward, rawObservation, terminal)
     end
 
     -- Rebalance priority queue for prioritised experience replay
-    if self.globals.step % self.memSize == 0 and self.memPriority then
+    if self.globals.step % self.memSize == 0 and self.memPriority then  -- self.memSize is experience replay memory size, memPriority is type of PER
       self.memory:rebalance()
     end
   end
@@ -263,7 +263,8 @@ function Agent:observe(reward, rawObservation, terminal)
     if self.bootstraps > 0 then
       -- Change bootstrap head for next episode
       self.head = torch.random(self.bootstraps)
-    elseif self.recurrent then
+    end
+    if self.recurrent then
       -- Forget last sequence
       self.policyNet:forget()
     end
@@ -285,8 +286,8 @@ function Agent:learn(x, indices, ISWeights, isValidation)
   -- Retrieve experience tuples
   local memory = isValidation and self.valMemory or self.memory
   local states, actions, rewards, transitions, terminals = memory:retrieve(indices) -- Terminal status is for transition (can't act in terminal state)
-  local N = actions:size(1)
-
+  local N = actions:size(1) -- # of s-a-s transitions (batchSize)
+  -- size of states/transitions is 32*10*1*24*24 for Catch demo, when recurrent is true and histLen is 10. batchSize is 32.
   if self.recurrent then
     -- Forget last sequence
     self.policyNet:forget()
@@ -308,7 +309,7 @@ function Agent:learn(x, indices, ISWeights, isValidation)
     -- Perform argmax action selection on transition using target network: argmax_a[Q(s', a; θtarget)]
     APrimeMax, APrimeMaxInds = torch.max(self.QPrimes, 3)
   end
-
+  -- self.QPrimes is a 3-dim tensor. 1st dim is batch index, 2nd dim is head index in bootstarps, 3rd dim is action index
   -- Initially set target Y = Q(s', argmax_a[Q(s', a; θ)]; θtarget), where initial θ is either θtarget (DQN) or θpolicy (DDQN)
   local Y = self.Tensor(N, self.heads)
   for n = 1, N do
@@ -319,20 +320,20 @@ function Agent:learn(x, indices, ISWeights, isValidation)
   Y:mul(self.gamma):add(rewards:repeatTensor(1, self.heads))
 
   -- Get all predicted Q-values from the current state
-  if self.recurrent and self.doubleQ then
+  if self.recurrent and self.doubleQ then -- call forget here since if doubleQ is used, policyNet has been utilized above in QPrime calc
     self.policyNet:forget()
   end
   local QCurr = self.policyNet:forward(states) -- Correct internal state of policy network before backprop
   local QTaken = self.Tensor(N, self.heads)
   -- Get prediction of current Q-values with given actions
   for n = 1, N do
-    QTaken[n] = QCurr[n][{{}, {actions[n]}}]
+    QTaken[n] = QCurr[n][{{}, {actions[n]}}]  -- in QCurr[n], data are of 2-dim. 1st is head index, 2nd is action index.
   end
 
   -- Calculate TD-errors δ := ∆Q(s, a) = Y − Q(s, a)
-  self.tdErr = Y - QTaken
+  self.tdErr = Y - QTaken -- self.tdErr should be a 3-dim tensor. 1st dim is batch index, 2nd dim is head index, 3rd dim has only one value.
 
-  -- Calculate Advantage Learning update(s)
+  -- Calculate Persistant Advantage Learning update(s)
   if self.PALpha > 0 then
     -- Calculate Q(s, a) and V(s) using target network
     if self.recurrent then
@@ -343,7 +344,7 @@ function Agent:learn(x, indices, ISWeights, isValidation)
     for n = 1, N do
       Q[n] = Qs[n][{{}, {actions[n]}}]
     end
-    local V = torch.max(Qs, 3) -- Current states cannot be terminal
+    local V = torch.max(Qs, 3) -- Current states cannot be terminal. 3-dim includes batchIndex, head index, action index
 
     -- Calculate Advantage Learning update ∆ALQ(s, a) := δ − αPAL(V(s) − Q(s, a))
     local tdErrAL = self.tdErr - V:csub(Q):mul(self.PALpha)
@@ -381,7 +382,6 @@ function Agent:learn(x, indices, ISWeights, isValidation)
 
   -- Send TD-errors δ to be used as priorities
   self.memory:updatePriorities(indices, torch.mean(self.tdErr, 2)) -- Use average error over heads
-  
   -- Zero QCurr outputs (no error)
   QCurr:zero()
   -- Set TD-errors δ with given actions
@@ -480,10 +480,11 @@ function Agent:validate()
     startIndex = (n - 1)*self.batchSize + 2
     endIndex = math.min(n*self.batchSize + 1, self.valSize + 1)
     batchSize = endIndex - startIndex + 1
-    indices = torch.linspace(startIndex, endIndex, batchSize):long()
+    indices = torch.linspace(startIndex, endIndex, batchSize):long()  -- This is a way to generate a tensor of # numbers ranging from startIn to endIn
 
     -- Perform "learning" (without optimisation)
     self:learn(self.theta, indices, ISWeights:narrow(1, 1, batchSize), true)
+    -- tensor:narrow() returns the ref to the original tensor along dim 1, with indices ranging from 1 to batchSize. A little bit like select()
 
     -- Calculate V(s') and TD-error δ
     if self.PALpha == 0 then

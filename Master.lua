@@ -11,19 +11,19 @@ local Master = classic.class('Master')
 function Master:_init(opt)
   self.opt = opt
   self.verbose = opt.verbose
-  self.learnStart = opt.learnStart
-  self.progFreq = opt.progFreq
+  self.learnStart = opt.learnStart  -- For the Catch environment, the learnStart is set to 50000
+  self.progFreq = opt.progFreq  -- Reporting progress (printing) frequency
   self.reportWeights = opt.reportWeights
-  self.noValidation = opt.noValidation
-  self.valFreq = opt.valFreq
-  self.experiments = opt.experiments
+  self.noValidation = opt.noValidation  -- Disable asynchronous validation, false as default
+  self.valFreq = opt.valFreq  -- In the Catch env, this value is set to 250000. #epochs = steps/valFreq
+  self.experiments = opt.experiments  -- This indicates the directory where log files are stored
   self._id = opt._id
 
   -- Set up singleton global object for transferring step
   self.globals = Singleton({step = 1}) -- Initial step
 
   -- Initialise environment
-  log.info('Setting up ' .. opt.env)
+  log.info('Setting up ' .. opt.env)  -- name of the enviornment, like rlenvs.Catch
   local Env = require(opt.env)
   self.env = Env(opt) -- Environment instantiation
 

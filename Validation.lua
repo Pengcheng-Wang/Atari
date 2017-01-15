@@ -27,7 +27,7 @@ end
 function Validation:validate()
   log.info('Validating')
   -- Set environment and agent to evaluation mode
-  self.env:evaluate()
+  self.env:evaluate() -- It's a little confusing, since in rlenvs, only Atari has def of evaluate(). But no errors thrown when Catch is run
   self.agent:evaluate()
 
   -- Start new game
